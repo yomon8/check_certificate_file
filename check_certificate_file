@@ -1,0 +1,103 @@
+#!/bin/sh
+PROGNAME=`basename $0`
+REVISION="1.0.0"
+PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin"
+export PATH
+
+# Nagios Status Code
+STATE_OK=0
+STATE_WARNING=1
+STATE_CRITICAL=2
+STATE_UNKNOWN=3
+STATE_DEPENDENT=4
+
+print_usage() {
+    echo "Check expiration date of ssl certification file plugin for Nagios"
+    echo "Usage: ${PROGNAME} --crt-file crtfile.crt -w WARNING_DAYS -c CRITICAL_DAYS"
+    echo "Usage: ${PROGNAME} --crt-file crtfile.crt -w WARNING_DAYS"
+    echo "Usage: ${PROGNAME} --help"
+    echo "Usage: ${PROGNAME} --version"
+}
+
+if [ $# -lt 4 ]; then
+    print_usage
+    exit ${STATE_UNKNOWN}
+fi
+
+while test -n "$1"; do
+    case "$1" in
+        -h)
+            print_usage
+            exit ${STATE_OK}
+            ;;
+        --crt-file)
+            crt_file=$2
+            shift
+            ;;
+        -w)
+            warning_days=$2
+            shift
+            ;;
+        -c)
+            critical_days=$2
+            shift
+            ;;
+        -v)
+            print_revision ${PROGNAME} ${REVISION}
+            exit ${STATE_OK}
+            ;;
+        *)
+            echo "Unknown argument: $1"
+            print_usage
+            exit ${STATE_UNKNOWN}
+            ;;
+    esac
+    shift
+done
+
+if [ ! -e ${crt_file} ];then
+  echo "Crt file ${crt_file} does not exist."
+  exit ${STATE_UNKNOWN}
+fi
+if [ ! -z ${warning_days} ];then
+  if ! expr ${warning_days} + 1 &> /dev/null;then
+    echo "the warning days should be an integer."
+    exit ${STATE_UNKNOWN}
+  else
+    has_warning_days=true
+  fi
+fi
+if [ ! -z ${critical_days} ];then
+  if ! expr ${critical_days} + 1 &> /dev/null;then
+    echo "the critical days should be an integer."
+    exit ${STATE_UNKNOWN}
+  else
+    has_critical_days=true
+  fi
+fi
+
+date_string=$(openssl x509 -noout -dates -in ${crt_file} | grep notAfter | sed -e 's/notAfter=//')
+ssl_date=$(date -d "${date_string}" '+%s')
+now_date=$(date '+%s')
+diff="$((${ssl_date}-${now_date}))"
+
+if [ "${diff}" -lt "0" ];then
+   echo "The certificate file ${crt_file} has already expired."
+   exit ${STATE_CRITICAL}
+else
+   echo "The certificate file ${crt_file} will expire in $((${diff}/3600/24)) days."
+   if [ ${has_critical_days} ];then
+     if [ "${diff}" -lt "$((${critical_days}*24*3600))" ];then
+       exit ${STATE_CRITICAL}
+     fi
+   fi
+   if [ ${has_warning_days} ];then
+     if [ "${diff}" -lt "$((${warning_days}*24*3600))" ];then
+       exit ${STATE_WARNING}
+     fi
+   fi
+fi
+
+
+
+
